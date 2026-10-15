@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 Arm Limited and/or its affiliates <open-source-office@arm.com>
 # SPDX-License-Identifier: Apache-2.0
 
+import unittest
 from pathlib import Path
 from typing import cast
 
@@ -20,6 +21,8 @@ from etdump_data_provider_model_explorer.provider import (
     ETDumpProfilingOverlayProvider,
 )
 
+_ASSERT = unittest.TestCase()
+
 TESTS_ROOT = Path(__file__).resolve().parent
 FIXTURES_ROOT = TESTS_ROOT / "fixtures" / "simple_convnet"
 
@@ -27,21 +30,23 @@ FIXTURES_ROOT = TESTS_ROOT / "fixtures" / "simple_convnet"
 def test_provider_exposes_required_etdump_upload():
     provider = ETDumpProfilingOverlayProvider()
     metadata = provider.metadata
-    assert not isinstance(metadata, list)
-    assert metadata.filter is not None
-    assert metadata.filter.adapterIds == ["etrecord_adapter"]
+    if isinstance(metadata, list):
+        raise AssertionError("not isinstance(metadata, list)")
+    if metadata.filter is None:
+        raise AssertionError("Expected an adapter filter")
+    _ASSERT.assertEqual(metadata.filter.adapterIds, ["etrecord_adapter"])
 
     result = provider.get_config_editors(metadata.id)
 
-    assert result.error == ""
+    _ASSERT.assertEqual(result.error, "")
 
     config_editors = cast(
         list[config_editor.FileConfigEditor], result.configEditors
     )
     first_editor = config_editors[0]
-    assert first_editor.id == "etdump_path"
-    assert first_editor.required is True
-    assert first_editor.fileExts == ["etdp", "etdump"]
+    _ASSERT.assertEqual(first_editor.id, "etdump_path")
+    _ASSERT.assertIs(first_editor.required, True)
+    _ASSERT.assertEqual(first_editor.fileExts, ["etdp", "etdump"])
 
 
 def test_provider_builds_runtime_overlay_for_graph():
@@ -50,15 +55,16 @@ def test_provider_builds_runtime_overlay_for_graph():
         FIXTURES_ROOT / "input.etrecord", settings={}
     )
     graph_collections = builder.build()
-    assert graph_collections
+    _ASSERT.assertTrue(graph_collections)
 
     graphs = graph_collections[0].graphs
-    assert graphs
+    _ASSERT.assertTrue(graphs)
 
     graph = graphs[0]
 
     metadata = provider.metadata
-    assert not isinstance(metadata, list)
+    if isinstance(metadata, list):
+        raise AssertionError("not isinstance(metadata, list)")
 
     result = provider.run(
         provider_id=metadata.id,
@@ -68,10 +74,11 @@ def test_provider_builds_runtime_overlay_for_graph():
         graph=graph,
     )
 
-    assert result.error == ""
+    _ASSERT.assertEqual(result.error, "")
 
     overlays_result = result.result
-    assert overlays_result is not None
+    if overlays_result is None:
+        raise AssertionError("Expected profiling overlays")
     overlays_result = (
         overlays_result
         if isinstance(overlays_result, list)
@@ -87,16 +94,18 @@ def test_provider_builds_runtime_overlay_for_graph():
         "Runtime Total P50 (ms)",
         "Runtime Event Count",
     ]:
-        assert expected_name in overlay_names
+        _ASSERT.assertIn(expected_name, overlay_names)
 
     for overlay in overlays:
-        assert overlay.results
+        _ASSERT.assertTrue(overlay.results)
         for node_result in overlay.results.values():
-            assert isinstance(node_result.value, (int, float))
-            assert node_result.value > 0
-        assert overlay.gradient is not None
-        assert len(overlay.gradient) == 2
-        assert overlay.hideAggregatedStats == ["sum"]
+            if not isinstance(node_result.value, (int, float)):
+                raise AssertionError("Expected a numeric node metric")
+            _ASSERT.assertGreater(node_result.value, 0)
+        if overlay.gradient is None:
+            raise AssertionError("Expected an overlay gradient")
+        _ASSERT.assertEqual(len(overlay.gradient), 2)
+        _ASSERT.assertEqual(overlay.hideAggregatedStats, ["sum"])
 
 
 def test_provider_requires_explicit_etdump_upload():
@@ -105,15 +114,16 @@ def test_provider_requires_explicit_etdump_upload():
         FIXTURES_ROOT / "input.etrecord", settings={}
     )
     graph_collections = builder.build()
-    assert graph_collections
+    _ASSERT.assertTrue(graph_collections)
 
     graphs = graph_collections[0].graphs
-    assert graphs
+    _ASSERT.assertTrue(graphs)
 
     graph = graphs[0]
 
     metadata = provider.metadata
-    assert not isinstance(metadata, list)
+    if isinstance(metadata, list):
+        raise AssertionError("not isinstance(metadata, list)")
 
     result = provider.run(
         provider_id=metadata.id,
@@ -123,8 +133,8 @@ def test_provider_requires_explicit_etdump_upload():
         graph=graph,
     )
 
-    assert result.result is None
-    assert "ETDump file upload is required" in result.error
+    _ASSERT.assertIsNone(result.result)
+    _ASSERT.assertIn("ETDump file upload is required", result.error)
 
 
 def test_provider_sums_concrete_events_and_ignores_operator_call(
@@ -179,7 +189,8 @@ def test_provider_sums_concrete_events_and_ignores_operator_call(
     )
 
     metadata = provider.metadata
-    assert not isinstance(metadata, list)
+    if isinstance(metadata, list):
+        raise AssertionError("not isinstance(metadata, list)")
 
     result = provider.run(
         provider_id=metadata.id,
@@ -189,24 +200,32 @@ def test_provider_sums_concrete_events_and_ignores_operator_call(
         graph=graph,
     )
 
-    assert result.error == ""
+    _ASSERT.assertEqual(result.error, "")
     overlays = cast(list[node_data_builder.GraphNodeData], result.result)
     avg_overlay = next(
         overlay
         for overlay in overlays
         if overlay.name == "Runtime Total Avg (ms)"
     )
-    assert avg_overlay.results["aten_convolution_default_"].value == 3.0
+    _ASSERT.assertEqual(
+        avg_overlay.results["aten_convolution_default_"].value, 3.0
+    )
 
     count_overlay = next(
         overlay
         for overlay in overlays
         if overlay.name == "Runtime Event Count"
     )
-    assert count_overlay.results["aten_convolution_default_"].value == 2
-    assert all(
-        not overlay.name.startswith("Runtime OPERATOR_CALL")
-        for overlay in overlays
+    _ASSERT.assertEqual(
+        count_overlay.results["aten_convolution_default_"].value, 2
+    )
+    _ASSERT.assertTrue(
+        all(
+            (
+                not overlay.name.startswith("Runtime OPERATOR_CALL")
+                for overlay in overlays
+            )
+        )
     )
 
 
@@ -242,7 +261,8 @@ def test_provider_ignores_delegate_call_when_no_concrete_events(
     )
 
     metadata = provider.metadata
-    assert not isinstance(metadata, list)
+    if isinstance(metadata, list):
+        raise AssertionError("not isinstance(metadata, list)")
 
     result = provider.run(
         provider_id=metadata.id,
@@ -252,8 +272,8 @@ def test_provider_ignores_delegate_call_when_no_concrete_events(
         graph=graph,
     )
 
-    assert result.result is None
-    assert "No profiling events" in result.error
+    _ASSERT.assertIsNone(result.result)
+    _ASSERT.assertIn("No profiling events", result.error)
 
 
 def test_provider_uses_delegate_event_as_concrete_event(
@@ -288,7 +308,8 @@ def test_provider_uses_delegate_event_as_concrete_event(
     )
 
     metadata = provider.metadata
-    assert not isinstance(metadata, list)
+    if isinstance(metadata, list):
+        raise AssertionError("not isinstance(metadata, list)")
 
     result = provider.run(
         provider_id=metadata.id,
@@ -298,7 +319,7 @@ def test_provider_uses_delegate_event_as_concrete_event(
         graph=graph,
     )
 
-    assert result.error == ""
+    _ASSERT.assertEqual(result.error, "")
     overlays = cast(list[node_data_builder.GraphNodeData], result.result)
 
     avg_overlay = next(
@@ -306,14 +327,17 @@ def test_provider_uses_delegate_event_as_concrete_event(
         for overlay in overlays
         if overlay.name == "Runtime Total Avg (ms)"
     )
-    assert avg_overlay.results["aten_convolution_default_"].value == 4.0
-    assert all(
-        overlay.name
-        != (
-            "Runtime CoreMLBackend/"
-            "aten_hardtanh_default_cast_fp16:clip Avg (ms)"
+    _ASSERT.assertEqual(
+        avg_overlay.results["aten_convolution_default_"].value, 4.0
+    )
+    _ASSERT.assertTrue(
+        all(
+            (
+                overlay.name
+                != "Runtime CoreMLBackend/aten_hardtanh_default_cast_fp16:clip Avg (ms)"
+                for overlay in overlays
+            )
         )
-        for overlay in overlays
     )
 
 
@@ -357,7 +381,8 @@ def test_provider_ignores_duplicate_operator_calls(monkeypatch):
     )
 
     metadata = provider.metadata
-    assert not isinstance(metadata, list)
+    if isinstance(metadata, list):
+        raise AssertionError("not isinstance(metadata, list)")
 
     result = provider.run(
         provider_id=metadata.id,
@@ -367,8 +392,8 @@ def test_provider_ignores_duplicate_operator_calls(monkeypatch):
         graph=graph,
     )
 
-    assert result.result is None
-    assert "No profiling events" in result.error
+    _ASSERT.assertIsNone(result.result)
+    _ASSERT.assertIn("No profiling events", result.error)
 
 
 def test_provider_sums_duplicate_concrete_events(monkeypatch):
@@ -421,7 +446,8 @@ def test_provider_sums_duplicate_concrete_events(monkeypatch):
     )
 
     metadata = provider.metadata
-    assert not isinstance(metadata, list)
+    if isinstance(metadata, list):
+        raise AssertionError("not isinstance(metadata, list)")
 
     result = provider.run(
         provider_id=metadata.id,
@@ -431,7 +457,7 @@ def test_provider_sums_duplicate_concrete_events(monkeypatch):
         graph=graph,
     )
 
-    assert result.error == ""
+    _ASSERT.assertEqual(result.error, "")
     overlays = cast(list[node_data_builder.GraphNodeData], result.result)
 
     avg_overlay = next(
@@ -439,11 +465,15 @@ def test_provider_sums_duplicate_concrete_events(monkeypatch):
         for overlay in overlays
         if overlay.name == "Runtime Total Avg (ms)"
     )
-    assert avg_overlay.results["aten_convolution_default_"].value == 3.0
+    _ASSERT.assertEqual(
+        avg_overlay.results["aten_convolution_default_"].value, 3.0
+    )
 
     count_overlay = next(
         overlay
         for overlay in overlays
         if overlay.name == "Runtime Event Count"
     )
-    assert count_overlay.results["aten_convolution_default_"].value == 2
+    _ASSERT.assertEqual(
+        count_overlay.results["aten_convolution_default_"].value, 2
+    )

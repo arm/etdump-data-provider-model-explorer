@@ -239,7 +239,8 @@ jobs:
           TWINE_REPOSITORY_URL: ${{ vars.INTERNAL_PYPI_UPLOAD_URL }}
           TWINE_USERNAME: ${{ secrets.INTERNAL_PYPI_USERNAME }}
           TWINE_PASSWORD: ${{ secrets.INTERNAL_PYPI_TOKEN }}
-        run: |
+        # Internal Artifactory uses credentials; the public PyPI job uses OIDC.
+        run: | # zizmor: ignore[use-trusted-publishing]
           python -m pip install twine
           python -m twine upload --non-interactive dist/*.whl
 
