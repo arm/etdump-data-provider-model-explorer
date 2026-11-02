@@ -5,10 +5,11 @@ import unittest
 from pathlib import Path
 from typing import cast
 
+import pytest
 from etrecord_adapter_model_explorer.builder.builder import (
     ETRecordGraphBuilder,
 )
-from model_explorer import config_editor, node_data_builder
+from model_explorer import config_editor, graph_builder, node_data_builder
 
 from etdump_data_provider_model_explorer import (
     provider as provider_module,
@@ -27,8 +28,25 @@ TESTS_ROOT = Path(__file__).resolve().parent
 FIXTURES_ROOT = TESTS_ROOT / "fixtures" / "simple_convnet"
 
 
-def test_provider_exposes_required_etdump_upload():
-    provider = ETDumpProfilingOverlayProvider()
+@pytest.fixture
+def provider():
+    return ETDumpProfilingOverlayProvider()
+
+
+@pytest.fixture
+def graph():
+    builder = ETRecordGraphBuilder(
+        FIXTURES_ROOT / "input.etrecord", settings={}
+    )
+    graph_collections = builder.build()
+    assert graph_collections
+
+    graphs = graph_collections[0].graphs
+    assert graphs
+    return graphs[0]
+
+
+def test_provider_exposes_required_etdump_upload(provider):
     metadata = provider.metadata
     if isinstance(metadata, list):
         raise AssertionError("not isinstance(metadata, list)")
@@ -49,19 +67,7 @@ def test_provider_exposes_required_etdump_upload():
     _ASSERT.assertEqual(first_editor.fileExts, ["etdp", "etdump"])
 
 
-def test_provider_builds_runtime_overlay_for_graph():
-    provider = ETDumpProfilingOverlayProvider()
-    builder = ETRecordGraphBuilder(
-        FIXTURES_ROOT / "input.etrecord", settings={}
-    )
-    graph_collections = builder.build()
-    _ASSERT.assertTrue(graph_collections)
-
-    graphs = graph_collections[0].graphs
-    _ASSERT.assertTrue(graphs)
-
-    graph = graphs[0]
-
+def test_provider_builds_runtime_overlay_for_graph(provider, graph):
     metadata = provider.metadata
     if isinstance(metadata, list):
         raise AssertionError("not isinstance(metadata, list)")
@@ -108,19 +114,7 @@ def test_provider_builds_runtime_overlay_for_graph():
         _ASSERT.assertEqual(overlay.hideAggregatedStats, ["sum"])
 
 
-def test_provider_requires_explicit_etdump_upload():
-    provider = ETDumpProfilingOverlayProvider()
-    builder = ETRecordGraphBuilder(
-        FIXTURES_ROOT / "input.etrecord", settings={}
-    )
-    graph_collections = builder.build()
-    _ASSERT.assertTrue(graph_collections)
-
-    graphs = graph_collections[0].graphs
-    _ASSERT.assertTrue(graphs)
-
-    graph = graphs[0]
-
+def test_provider_requires_explicit_etdump_upload(provider, graph):
     metadata = provider.metadata
     if isinstance(metadata, list):
         raise AssertionError("not isinstance(metadata, list)")
@@ -138,14 +132,10 @@ def test_provider_requires_explicit_etdump_upload():
 
 
 def test_provider_sums_concrete_events_and_ignores_operator_call(
+    provider,
+    graph,
     monkeypatch,
 ):
-    provider = ETDumpProfilingOverlayProvider()
-    builder = ETRecordGraphBuilder(
-        FIXTURES_ROOT / "input.etrecord", settings={}
-    )
-    graph = builder.build()[0].graphs[0]
-
     monkeypatch.setattr(
         provider_module,
         "load_runtime_overlay",
@@ -230,14 +220,10 @@ def test_provider_sums_concrete_events_and_ignores_operator_call(
 
 
 def test_provider_ignores_delegate_call_when_no_concrete_events(
+    provider,
+    graph,
     monkeypatch,
 ):
-    provider = ETDumpProfilingOverlayProvider()
-    builder = ETRecordGraphBuilder(
-        FIXTURES_ROOT / "input.etrecord", settings={}
-    )
-    graph = builder.build()[0].graphs[0]
-
     monkeypatch.setattr(
         provider_module,
         "load_runtime_overlay",
@@ -277,14 +263,10 @@ def test_provider_ignores_delegate_call_when_no_concrete_events(
 
 
 def test_provider_uses_delegate_event_as_concrete_event(
+    provider,
+    graph,
     monkeypatch,
 ):
-    provider = ETDumpProfilingOverlayProvider()
-    builder = ETRecordGraphBuilder(
-        FIXTURES_ROOT / "input.etrecord", settings={}
-    )
-    graph = builder.build()[0].graphs[0]
-
     monkeypatch.setattr(
         provider_module,
         "load_runtime_overlay",
@@ -341,13 +323,11 @@ def test_provider_uses_delegate_event_as_concrete_event(
     )
 
 
-def test_provider_ignores_duplicate_operator_calls(monkeypatch):
-    provider = ETDumpProfilingOverlayProvider()
-    builder = ETRecordGraphBuilder(
-        FIXTURES_ROOT / "input.etrecord", settings={}
-    )
-    graph = builder.build()[0].graphs[0]
-
+def test_provider_ignores_duplicate_operator_calls(
+    provider,
+    graph,
+    monkeypatch,
+):
     monkeypatch.setattr(
         provider_module,
         "load_runtime_overlay",
@@ -396,13 +376,7 @@ def test_provider_ignores_duplicate_operator_calls(monkeypatch):
     _ASSERT.assertIn("No profiling events", result.error)
 
 
-def test_provider_sums_duplicate_concrete_events(monkeypatch):
-    provider = ETDumpProfilingOverlayProvider()
-    builder = ETRecordGraphBuilder(
-        FIXTURES_ROOT / "input.etrecord", settings={}
-    )
-    graph = builder.build()[0].graphs[0]
-
+def test_provider_sums_duplicate_concrete_events(provider, graph, monkeypatch):
     monkeypatch.setattr(
         provider_module,
         "load_runtime_overlay",
@@ -476,4 +450,103 @@ def test_provider_sums_duplicate_concrete_events(monkeypatch):
     )
     _ASSERT.assertEqual(
         count_overlay.results["aten_convolution_default_"].value, 2
+    )
+
+
+def test_provider_rejects_invalid_etrecord_file_type(provider, tmp_path):
+    metadata = provider.metadata
+
+    result = provider.run(
+        provider_id=metadata.id,
+        model_path=str(tmp_path / "not_an_etrecord.txt"),
+        graph_id="",
+        config_values={"etdump_path": str(FIXTURES_ROOT / "input.etdp")},
+        graph=None,
+    )
+
+    assert result.result is None
+    assert "only supports" in result.error
+
+
+def test_provider_errors_on_missing_graph(provider):
+    metadata = provider.metadata
+
+    result = provider.run(
+        provider_id=metadata.id,
+        model_path=str(FIXTURES_ROOT / "input.etrecord"),
+        graph_id="",
+        config_values={"etdump_path": str(FIXTURES_ROOT / "input.etdp")},
+        graph=None,
+    )
+
+    assert result.result is None
+    assert "did not provide" in result.error
+
+
+def test_provider_errors_on_profiling_data_load_fail(
+    provider,
+    graph,
+    monkeypatch,
+):
+    metadata = provider.metadata
+
+    parse_error_message = "Debug entry inside debug event should not be empty!"
+
+    def etdump_inspector_parse_error(**_kwargs):
+        raise RuntimeError(parse_error_message)
+
+    monkeypatch.setattr(
+        provider_module, "load_runtime_overlay", etdump_inspector_parse_error
+    )
+
+    result = provider.run(
+        provider_id=metadata.id,
+        model_path=str(FIXTURES_ROOT / "input.etrecord"),
+        graph_id="graph.id",
+        config_values={"etdump_path": str(FIXTURES_ROOT / "input.etdp")},
+        graph=graph,
+    )
+
+    assert result.result is None
+    assert parse_error_message in result.error
+
+
+def test_provider_errors_on_nonexistent_etrecord_path(provider, tmp_path):
+    metadata = provider.metadata
+
+    result = provider.run(
+        provider_id=metadata.id,
+        model_path=str(tmp_path / "input.etrecord"),
+        graph_id="graph.id",
+        config_values={},
+        graph=None,
+    )
+
+    assert result.result is None
+    assert "ETRecord file upload is required" in result.error
+
+
+def test_provider_errors_on_nonexistent_etdump_path(provider, tmp_path):
+    metadata = provider.metadata
+
+    result = provider.run(
+        provider_id=metadata.id,
+        model_path=str(FIXTURES_ROOT / "input.etrecord"),
+        graph_id="graph.id",
+        config_values={"etdump_path": str(tmp_path / "input.etdp")},
+        graph=None,
+    )
+
+    assert result.result is None
+    assert "ETDump file upload is required" in result.error
+
+
+def test_node_debug_handle_returns_none_for_non_numeric_value():
+    node_with_non_numeric_debug_handle = graph_builder.GraphNode(
+        id="node_1",
+        label="node_with_non_numeric_debug_handle",
+        attrs=[graph_builder.KeyValue("debug_handle", "not_a_number")],
+    )
+    _ASSERT.assertIsNone(
+        provider_module._node_debug_handle(node_with_non_numeric_debug_handle)
     )
